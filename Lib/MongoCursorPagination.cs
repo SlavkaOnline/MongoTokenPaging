@@ -7,16 +7,16 @@ namespace MongoTokenPaging.Lib;
 
 public static class MongoCursorPagination
 {
-    public static async Task<PageResult<T>> GetPagedAsync<T>(
+    public static async Task<PageResult<T>> GetPageAsync<T>(
         this IMongoCollection<T> collection,
         IFilter<T> filter,
         SortBuilder<T> baseSortBuilder,
         int pageSize,
-        string? encodedToken
+        string? encodedToken = null
         )
     where T: class
     {
-        Dictionary<string, object>? lastValues = null;
+        Dictionary<string, JsonElement>? lastValues = null;
         if (!string.IsNullOrEmpty(encodedToken))
         {
             lastValues = DecodeToken(encodedToken);
@@ -37,10 +37,11 @@ public static class MongoCursorPagination
             {
                 if (!lastValues.TryGetValue(sort.FieldName, out var lastValueObj)) continue;
                 
-                var lastValue = BsonValue.Create(lastValueObj);
+                var lastValue = sort.FieldName == "_id" 
+                    ? ObjectId.Parse(lastValueObj.ToString())
+                    : BsonValue.Create(lastValueObj.ToString());
 
-                FilterDefinition<T> rangeFilter;
-                rangeFilter = sort.SortDir == SortDir.Asc 
+                var rangeFilter = sort.SortDir == SortDir.Asc 
                     ? builder.Gt(sort.FieldName, lastValue) 
                     : builder.Lt(sort.FieldName, lastValue);
 
@@ -88,7 +89,7 @@ public static class MongoCursorPagination
                 if (bsonDoc.Contains(sort.FieldName))
                 {
                     var val = BsonTypeMapper.MapToDotNetValue(bsonDoc[sort.FieldName]);
-                    tokenData[sort.FieldName] = val;
+                    tokenData[sort.FieldName] = val.ToString();
                 }
             }
             nextToken = EncodeToken(tokenData);
@@ -103,12 +104,12 @@ public static class MongoCursorPagination
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
     }
 
-    private static Dictionary<string, object>? DecodeToken(string token)
+    private static Dictionary<string, JsonElement>? DecodeToken(string token)
     {
         try 
         {
             var json = Encoding.UTF8.GetString(Convert.FromBase64String(token));
-            return JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+            return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
         }
         catch
         {
